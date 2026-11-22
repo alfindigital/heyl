@@ -131,6 +131,9 @@ heyl list --format json | jq -r '.[].title'
 heyl run --project github.com/mrh1997/heyl/prod -- terraform apply
 ```
 
+`heyl run` hides the project's protected values in the command's output: wherever it prints one,
+you see `********` instead (`--no-mask` turns that off).
+
 Read-only by design: it never creates, edits or deletes logins. The single exception is
 registering itself as a named, revocable device in your heylogin app.
 

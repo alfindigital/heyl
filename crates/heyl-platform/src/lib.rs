@@ -16,6 +16,7 @@ pub mod child;
 pub mod clock;
 pub mod headless;
 pub mod keychain;
+pub mod mask;
 pub mod process;
 pub mod random;
 pub mod terminal;

@@ -24,10 +24,11 @@ heyl-ports  = { workspace = true }
 
 async-trait = { workspace = true }
 # `process` and `signal` are `heyl run`'s: spawning the child, and ignoring
-# the interrupt that belongs to it while it runs (`child.rs`). `sync` and
+# the interrupt that belongs to it while it runs, and (`io-std`) copying its
+# masked output to heyl's own stdout and stderr (`child.rs`). `sync` and
 # `io-util` are the approval window's: its protocol over the child's streams
 # (`approval_ui.rs`).
-tokio       = { workspace = true, features = ["time", "process", "signal", "sync", "io-util"] }
+tokio       = { workspace = true, features = ["time", "process", "signal", "sync", "io-util", "io-std"] }
 qrcode      = { workspace = true }
 jiff        = { workspace = true }
 keyring     = { workspace = true }

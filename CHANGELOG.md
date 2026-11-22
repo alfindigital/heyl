@@ -1,5 +1,9 @@
 # Changelog
 
+- `heyl run` now hides passwords in the command's output: every value of a protected custom field
+  (4 characters or more) is replaced by as many `*` in what the command prints on stdout and
+  stderr. `--no-mask` turns this off, for programs that need a real terminal.
+
 ## Release 2026.11.22
 
 - Fixed the nightly release, which failed before building anything, so `heyl` is now actually

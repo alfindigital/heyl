@@ -1,8 +1,8 @@
 //! `heyl run`'s child process.
 //!
 //! heyl spawns the command after `--` with the resolved variables added to its
-//! own environment, inherits stdin, stdout and stderr, and waits. Three things
-//! make that more than a `Command::status`:
+//! own environment, inherits stdin, and waits. Four things make that more than
+//! a `Command::status`:
 //!
 //! * **Interrupts belong to the child.** Ctrl-C reaches every process attached
 //!   to the terminal. Were heyl to die of it, the shell would get its prompt
@@ -16,6 +16,11 @@
 //!   `std::process::Command` only ever appends `.exe`, so `heyl run -- npm test`
 //!   would fail where `npm test` works; [`resolve`] applies `PATHEXT` the way
 //!   `cmd.exe` does.
+//! * **Secrets are masked in its output.** Given values to mask, heyl pipes
+//!   the child's stdout and stderr through a [`Masker`] each, which turns every
+//!   occurrence into stars, and only returns once both pipes are drained. With
+//!   nothing to mask both streams are inherited, as they are under `--no-mask`:
+//!   a pipe is not a terminal, and some programs behave differently without one.
 //!
 //! The variables are copied into the `Command` and the `Command` is dropped
 //! right after the spawn: those copies are ordinary allocations, and the
@@ -23,9 +28,16 @@
 
 use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
+use std::process::Stdio;
+
+use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
+use zeroize::Zeroizing;
+
+use crate::mask::Masker;
 
 /// Run `program` with `args`, adding `variables` to the inherited environment,
-/// and wait for it.
+/// and wait for it. Every occurrence of a value in `mask` is replaced by stars
+/// in what it writes to stdout and stderr.
 ///
 /// Returns the child's exit code.
 ///
@@ -36,18 +48,81 @@ pub async fn run<'a>(
     program: &OsStr,
     args: &[OsString],
     variables: impl IntoIterator<Item = (&'a str, &'a str)>,
+    mask: &[&str],
+) -> std::io::Result<i32> {
+    run_with(
+        program,
+        args,
+        variables,
+        mask,
+        tokio::io::stdout(),
+        tokio::io::stderr(),
+    )
+    .await
+}
+
+/// [`run`], writing the masked output to `stdout` and `stderr`.
+async fn run_with<'a>(
+    program: &OsStr,
+    args: &[OsString],
+    variables: impl IntoIterator<Item = (&'a str, &'a str)>,
+    mask: &[&str],
+    stdout: impl AsyncWrite + Unpin,
+    stderr: impl AsyncWrite + Unpin,
 ) -> std::io::Result<i32> {
     // Registered before the spawn, held until the wait ends: while a handler
     // is registered, an interrupt no longer terminates heyl.
     let _interrupts = IgnoreInterrupts::register();
 
+    let masking = !Masker::new(mask.iter().copied()).is_empty();
     let mut command = tokio::process::Command::new(resolve(program));
     command.args(args).envs(variables);
+    if masking {
+        command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    }
     let mut child = command.spawn()?;
     drop(command);
 
-    let status = child.wait().await?;
-    Ok(code(status))
+    if !masking {
+        return Ok(code(child.wait().await?));
+    }
+    let out = child.stdout.take().expect("stdout is piped");
+    let err = child.stderr.take().expect("stderr is piped");
+    // Both pipes are drained before the code is returned: whatever the child
+    // printed last must not be lost to heyl exiting first.
+    let (status, (), ()) = tokio::join!(
+        child.wait(),
+        pump(out, stdout, Masker::new(mask.iter().copied())),
+        pump(err, stderr, Masker::new(mask.iter().copied())),
+    );
+    Ok(code(status?))
+}
+
+/// Copy `from` to `to` through `masker`, until `from` ends.
+///
+/// Flushed after every read, so prompts and progress show up as they are
+/// written. If `to` fails — `heyl run … | head` closing its end — copying
+/// stops and `from` is closed, so the child sees the broken pipe it would
+/// have seen writing there itself.
+async fn pump(
+    mut from: impl AsyncRead + Unpin,
+    mut to: impl AsyncWrite + Unpin,
+    mut masker: Masker,
+) {
+    let mut buf = Zeroizing::new(vec![0u8; 8192]);
+    loop {
+        let n = match from.read(&mut buf).await {
+            Ok(0) | Err(_) => break,
+            Ok(n) => n,
+        };
+        let chunk = masker.push(&buf[..n]);
+        if to.write_all(&chunk).await.is_err() || to.flush().await.is_err() {
+            return;
+        }
+    }
+    let rest = masker.finish();
+    let _ = to.write_all(&rest).await;
+    let _ = to.flush().await;
 }
 
 /// The exit code a shell would report for `status`.
@@ -194,6 +269,56 @@ mod tests {
             );
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A shell command line, for the platform at hand.
+    fn shell(script: &str) -> (OsString, Vec<OsString>) {
+        if cfg!(windows) {
+            ("cmd".into(), vec!["/c".into(), script.into()])
+        } else {
+            ("sh".into(), vec!["-c".into(), script.into()])
+        }
+    }
+
+    async fn capture(script: &str, mask: &[&str]) -> (i32, String, String) {
+        let (program, args) = shell(script);
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let code = run_with(
+            &program,
+            &args,
+            [("SECRET", "hunter22")],
+            mask,
+            &mut out,
+            &mut err,
+        )
+        .await
+        .expect("spawn");
+        let text = |b: Vec<u8>| String::from_utf8(b).expect("utf-8").replace("\r\n", "\n");
+        (code, text(out), text(err))
+    }
+
+    #[tokio::test]
+    async fn secrets_in_stdout_and_stderr_become_stars() {
+        let script = if cfg!(windows) {
+            "echo pw=%SECRET%& echo err=%SECRET% 1>&2& exit 3"
+        } else {
+            "echo pw=$SECRET; echo err=$SECRET >&2; exit 3"
+        };
+        let (code, out, err) = capture(script, &["hunter22"]).await;
+        assert_eq!(code, 3);
+        assert_eq!(out.trim_end(), "pw=********");
+        assert_eq!(err.trim_end(), "err=********");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_secret_written_in_two_parts_is_still_masked() {
+        let (_, out, _) = capture(
+            "printf 'pw=hun'; sleep 0.2; printf 'ter22 done'",
+            &["hunter22"],
+        )
+        .await;
+        assert_eq!(out, "pw=******** done");
     }
 
     #[test]

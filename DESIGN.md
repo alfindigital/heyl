@@ -1018,8 +1018,9 @@ variable's value.
 | password, username, note, websites | not used |
 
 The resolved variables are added to heyl's own environment, and the result is the environment of
-`<cmd>`, which heyl spawns with the arguments after `--` untouched. stdin, stdout and stderr are
-inherited.
+`<cmd>`, which heyl spawns with the arguments after `--` untouched. stdin is inherited; stdout and
+stderr are inherited too unless there is something to mask (see **Masking** below), in which case
+they reach the terminal through heyl.
 
 **`--project` is validated** before anything is fetched (exit 7): it must not be empty (or be
 nothing but a scheme).
@@ -1062,7 +1063,29 @@ long-running child does not hold the unlock open.
 
 **Secrets.** Values exist only in heyl's memory and in the child's environment — never written to
 disk, never in argv, never in shell history, never in output. `--format json` does not change
-this: `run` prints nothing of its own on stdout, which belongs to `<cmd>`.
+this: `run` prints nothing of its own on stdout, which belongs to `<cmd>`. heyl keeps the values
+until `<cmd>` has exited and its output is drained, because masking needs them; they are wiped
+before heyl reports anything.
+
+**Masking.** What `<cmd>` itself prints is filtered: every occurrence of a **protected** field's
+value in its stdout or stderr is replaced by as many `*` as the value has characters, so a debug
+dump or a verbose log cannot carry a password into a CI log or an agent transcript.
+
+- **Protected only** — plain custom fields are, by the user's own choice in the heylogin app, not
+  secrets, and pass through.
+- **At least 4 characters** — shorter values (and empty ones) are not masked: starring every `1`
+  or `prod` would hide far more than it protects.
+- **Longest first** — where two values match at the same place, the longer one is starred whole.
+  A value split across two writes is still caught: a tail that could still become a value is held
+  back until the next write, or the end of the stream, decides it.
+- **Bytes, not text** — output that is not UTF-8 passes through intact.
+- **The cost** — with masking on, `<cmd>`'s stdout and stderr are pipes, not the terminal, so a
+  program that checks for one may drop colours, progress bars or prompts. `--no-mask` turns
+  masking off and attaches `<cmd>` straight to the terminal again; so does a login without a
+  maskable value.
+- **The limits** — a safety net, not a guarantee: a value printed encoded (base64, URL escapes),
+  transformed, or in pieces is not recognised, and nothing stops `<cmd>` writing it to a file or
+  the network.
 
 **Security note ⚠ PROPOSED.** A custom field's name decides a variable's *name*, so whoever can
 create a login with the project's URL in a searched vault can set any variable in your build —

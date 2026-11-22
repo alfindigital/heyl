@@ -85,6 +85,9 @@ pub struct Variable {
     pub name: String,
     /// The custom field's value, decrypted.
     pub value: Zeroizing<String>,
+    /// Whether the field is protected — hidden in the heylogin app, as a
+    /// password is. Only protected values are masked in the child's output.
+    pub protected: bool,
 }
 
 impl std::fmt::Debug for Variable {
@@ -93,6 +96,7 @@ impl std::fmt::Debug for Variable {
         f.debug_struct("Variable")
             .field("name", &self.name)
             .field("value", &"<redacted>")
+            .field("protected", &self.protected)
             .finish()
     }
 }
@@ -198,6 +202,7 @@ fn variables(
         variables.push(Variable {
             name: field.name.clone(),
             value: Zeroizing::new(decrypt(&field.value)?),
+            protected: matches!(field.value, FieldValue::Protected(_)),
         });
     }
     variables.sort_by(|a, b| a.name.cmp(&b.name));
@@ -332,6 +337,30 @@ mod tests {
             got,
             [("DATABASE_URL", "d"), ("EMPTY", ""), ("STRIPE_KEY", "s")]
         );
+    }
+
+    #[test]
+    fn a_variable_knows_whether_its_field_was_protected() {
+        use heyl_vault::login::Protected;
+        let mut l = with_fields(&[("PLAIN", "p")]);
+        l.custom_fields.push(CustomField {
+            id: None,
+            name: "SECRET".to_owned(),
+            value: FieldValue::Protected(Protected {
+                encrypted: String::new(),
+                is_empty: false,
+            }),
+        });
+        let vars = variables(&l, |value| match value {
+            FieldValue::Plain(s) => Ok(s.clone()),
+            FieldValue::Protected(_) => Ok("hunter22".to_owned()),
+        })
+        .expect("valid");
+        let got: Vec<(&str, &str, bool)> = vars
+            .iter()
+            .map(|v| (v.name.as_str(), v.value.as_str(), v.protected))
+            .collect();
+        assert_eq!(got, [("PLAIN", "p", false), ("SECRET", "hunter22", true)]);
     }
 
     #[test]

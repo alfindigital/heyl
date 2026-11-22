@@ -251,6 +251,11 @@ enum Command {
     /// private one wins, then the most recently changed. The command after `--` inherits
     /// heyl's environment plus these variables, and its exit code is heyl's.
     /// The values never reach disk, argv or stdout.
+    ///
+    /// The values of protected fields (4 characters or more) are replaced by
+    /// stars wherever the command prints them on stdout or stderr. For that,
+    /// its output goes through a pipe rather than straight to the terminal;
+    /// `--no-mask` turns this off.
     Run {
         /// The project login's URL, e.g. `github.com/me/app/prod`.
         #[arg(long, value_name = "PROJECT")]
@@ -264,6 +269,12 @@ enum Command {
         /// Search only this vault, by id.
         #[arg(short = 'V', long = "vault-id", value_name = "UUID")]
         vault_id: Option<String>,
+
+        /// Do not mask protected values in the command's output. It then
+        /// writes straight to the terminal, which some programs need for
+        /// colours, progress bars or prompts.
+        #[arg(long)]
+        no_mask: bool,
 
         /// The command to run, after `--`.
         #[arg(last = true, required = true, value_name = "COMMAND")]
@@ -532,10 +543,13 @@ async fn dispatch(
             project,
             vault_name,
             vault_id,
+            no_mask,
             command,
         } => {
+            let project = heyl_app::run::Project::parse(&project)?;
+            let vault = heyl_app::get::VaultSelector::from_flags(vault_name, vault_id)?;
             run_project(
-                &ports, &slot, cli.wait, &project, vault_name, vault_id, &command,
+                &ports, &slot, cli.wait, &project, &vault, !no_mask, &command,
             )
             .await
         }
@@ -569,14 +583,12 @@ async fn run_project(
     ports: &heyl_app::Ports<'_>,
     slot: &Slot,
     wait: Option<u64>,
-    project: &str,
-    vault_name: Option<String>,
-    vault_id: Option<String>,
+    project: &heyl_app::run::Project,
+    vault: &heyl_app::get::VaultSelector,
+    mask: bool,
     command: &[std::ffi::OsString],
 ) -> Result<std::process::ExitCode, AppError> {
-    let project = heyl_app::run::Project::parse(project)?;
-    let vault = heyl_app::get::VaultSelector::from_flags(vault_name, vault_id)?;
-    let resolved = heyl_app::run::run(ports, slot, &project, &vault, wait).await?;
+    let resolved = heyl_app::run::run(ports, slot, project, vault, wait).await?;
     // Before the child starts, not after it exits: a strict slot must
     // not stay unlocked for as long as a build runs (DESIGN.md §5).
     heyl_app::session::finish(ports, slot).await;
@@ -585,6 +597,18 @@ async fn run_project(
     let (program, args) = command
         .split_first()
         .expect("clap requires at least one word after --");
+    // Only protected values are masked: a plain field is, by the user's own
+    // choice, not a secret (DESIGN.md §5).
+    let masked: Vec<&str> = if mask {
+        resolved
+            .variables
+            .iter()
+            .filter(|v| v.protected)
+            .map(|v| v.value.as_str())
+            .collect()
+    } else {
+        Vec::new()
+    };
     let outcome = heyl_platform::child::run(
         program,
         args,
@@ -592,9 +616,13 @@ async fn run_project(
             .variables
             .iter()
             .map(|v| (v.name.as_str(), v.value.as_str())),
+        &masked,
     )
     .await;
-    // The values are wiped here, before heyl reports anything.
+    // The values are wiped here, once the child has exited and its output is
+    // drained (the masker needs them until then), and before heyl reports
+    // anything.
+    drop(masked);
     drop(resolved);
 
     match outcome {
