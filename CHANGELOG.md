@@ -1,5 +1,7 @@
 # Changelog
 
+## Release 2026.11.22
+
 - Fixed the nightly release, which failed before building anything, so `heyl` is now actually
   published to PyPI (`uvx heyl ...`) and GitHub Releases. A GitHub release carries only the
   wheels, the per-platform archives and their checksums.
