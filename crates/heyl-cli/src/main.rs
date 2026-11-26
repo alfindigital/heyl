@@ -237,6 +237,21 @@ enum Command {
         field_id: Option<String>,
     },
 
+    /// List active login metadata without revealing protected fields.
+    List {
+        /// Only include titles, display names, or domains matching this text.
+        #[arg(long, value_name = "QUERY")]
+        search: Option<String>,
+
+        /// Limit to a named vault, for example private.
+        #[arg(short = 'v', long = "vault-name", value_name = "NAME")]
+        vault_name: Option<String>,
+
+        /// Limit to a specific vault ID.
+        #[arg(short = 'V', long = "vault-id", value_name = "UUID")]
+        vault_id: Option<String>,
+    },
+
     /// Run a command with a project's secrets in its environment.
     ///
     /// The project is one login: the one whose name, title or website is the
@@ -525,6 +540,20 @@ async fn dispatch(
             // asks the phone again.
             heyl_app::session::finish(&ports, &slot).await;
             output::get(&located, cli.format);
+            Ok(std::process::ExitCode::SUCCESS)
+        }
+
+        Command::List {
+            search,
+            vault_name,
+            vault_id,
+        } => {
+            let selector = heyl_app::get::VaultSelector::from_flags(vault_name, vault_id)?;
+            let report =
+                heyl_app::metadata::run(&ports, &slot, &selector, search.as_deref(), cli.wait)
+                    .await;
+            heyl_app::session::finish(&ports, &slot).await;
+            output::metadata(&report?, cli.format);
             Ok(std::process::ExitCode::SUCCESS)
         }
 

@@ -122,12 +122,25 @@ python3 -m venv .venv && ./.venv/bin/pip install protobuf
 ./.venv/bin/python tools/extract-protos.py render      # -> proto/*.proto (gitignored)
 ```
 
+## List and search login metadata
+
+Build this fork to use these commands:
+
+```sh
+heyl list -v private
+heyl --format json list -v private --search example.com
+```
+
+Search matches titles, display names, and website hosts case-insensitively. Results contain the
+vault ID, login ID, title, and website hosts for active entries. Passwords, usernames, notes,
+custom fields, and URL paths and queries are omitted. JSON returns an object with `entries` and
+`skipped_vaults`. An explicitly selected vault that cannot be read returns an error.
+
 ## What it will do
 
 ```sh
 heyl get -l github.com -f password
 heyl totp aws-prod
-heyl list --format json | jq -r '.[].title'
 heyl run --project github.com/mrh1997/heyl/prod -- terraform apply
 ```
 

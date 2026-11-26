@@ -59,6 +59,28 @@ impl Format {
     }
 }
 
+pub fn metadata(report: &heyl_app::metadata::Report, format: Format) {
+    if format.is_json() {
+        emit(format, &serde_json::json!(report));
+        return;
+    }
+    for entry in &report.entries {
+        eprintln!(
+            "{}  {}  {:?}  {}",
+            entry.vault_id,
+            entry.login_id,
+            entry.title,
+            entry.domains.join(", "),
+        );
+    }
+    for vault in &report.skipped_vaults {
+        eprintln!("heyl: skipped unreadable vault {vault}");
+    }
+    if report.entries.is_empty() {
+        eprintln!("heyl: no matching logins");
+    }
+}
+
 /// Print one document, and get it out of the buffer.
 ///
 /// The flush is the point of writing this by hand rather than with `println!`:

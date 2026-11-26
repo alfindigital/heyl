@@ -1236,6 +1236,8 @@ dependencies = [
  "heyl-domain",
  "heyl-ports",
  "heyl-vault",
+ "http",
+ "serde",
  "serde_json",
  "thiserror 2.0.20",
  "tokio",

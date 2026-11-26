@@ -487,3 +487,49 @@ mod tests {
         assert!(differences[0].contains("printed 1 document(s), expected 2"));
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn metadata_list_replays_private_vault_without_printing_fields() {
+    let scenario = Scenario::load(&path_of("get")).expect("get fixture");
+    let state = TestDir::new("metadata_list", &scenario.meta.store);
+    let seed = &scenario.meta.first_draw;
+    let pair = &scenario.steps[0];
+    let server = Server::start(Arc::new(RecordedApi::new(pair.calls.clone())))
+        .await
+        .expect("a loopback port");
+    let outcome = invoke(pair, &server.endpoint(), &state, seed).await;
+    assert_eq!(outcome.code, 0, "{}", outcome.stderr);
+
+    let mut step = scenario
+        .steps
+        .iter()
+        .find(|step| step.argv.starts_with(&["get".to_owned(), "-V".to_owned()]))
+        .expect("get by vault ID fixture")
+        .clone();
+    let vault_id = step.argv[2].clone();
+    for (query, entries) in [
+        (
+            "USER.EXAMPLE.COM",
+            serde_json::json!([{
+                "vault_id": vault_id,
+                "login_id": "f1bcfdf7-c3ca-4fc6-925d-f57d5e8919bd",
+                "title": "User",
+                "domains": ["user.example.com"]
+            }]),
+        ),
+        ("no-such-example", serde_json::json!([])),
+    ] {
+        step.argv = ["list", "-V", &vault_id, "--search", query]
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        server.serve_from(Arc::new(RecordedApi::new(step.calls.clone())));
+        let outcome = invoke(&step, &server.endpoint(), &state, seed).await;
+        assert_eq!(outcome.code, 0, "{}", outcome.stderr);
+        assert!(server.unmatched().is_empty());
+        assert_eq!(
+            parse_stdout(&outcome.stdout, "metadata_list", 1),
+            [serde_json::json!({"entries": entries, "skipped_vaults": []})]
+        );
+    }
+}
