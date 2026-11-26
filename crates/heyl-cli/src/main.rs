@@ -7,6 +7,7 @@
 
 #[cfg(feature = "dev")]
 mod api;
+mod dummy_vault;
 mod output;
 #[cfg(not(target_os = "linux"))]
 mod window;
@@ -237,6 +238,9 @@ enum Command {
         field_id: Option<String>,
     },
 
+    /// Edit the title of an entry in a local synthetic vault.
+    EditTitle(dummy_vault::EditTitle),
+
     /// List active login metadata without revealing protected fields.
     List {
         /// Only include titles, display names, or domains matching this text.
@@ -431,6 +435,11 @@ fn main() -> std::process::ExitCode {
         return std::process::ExitCode::from(ExitCode::Failure as u8);
     }
 
+    let cli = Cli::parse();
+    if let Command::EditTitle(args) = &cli.command {
+        return dummy_vault::run(args, cli.format);
+    }
+
     // `current_thread`: measured ~650 µs cheaper per invocation than
     // `multi_thread`, with an identical binary size (DESIGN.md §4).
     let runtime = match tokio::runtime::Builder::new_current_thread()
@@ -444,7 +453,7 @@ fn main() -> std::process::ExitCode {
         }
     };
 
-    match runtime.block_on(run(Cli::parse())) {
+    match runtime.block_on(run(cli)) {
         Ok(code) => code,
         Err(e) => {
             eprintln!("heyl: {e}");
@@ -542,6 +551,8 @@ async fn dispatch(
             output::get(&located, cli.format);
             Ok(std::process::ExitCode::SUCCESS)
         }
+
+        Command::EditTitle(_) => unreachable!("local edit is handled before adapter setup"),
 
         Command::List {
             search,

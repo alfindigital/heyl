@@ -51,6 +51,7 @@ zeroize        = { workspace = true }
 tower          = { workspace = true }
 
 [dependencies]
+tempfile    = "3.27.0"
 heyl-app      = { workspace = true }
 heyl-crypto   = { workspace = true }
 heyl-domain   = { workspace = true }

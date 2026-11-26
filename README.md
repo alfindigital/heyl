@@ -136,6 +136,30 @@ vault ID, login ID, title, and website hosts for active entries. Passwords, user
 custom fields, and URL paths and queries are omitted. JSON returns an object with `entries` and
 `skipped_vaults`. An explicitly selected vault that cannot be read returns an error.
 
+## Edit a title in a local dummy vault
+
+Save this synthetic fixture as `dummy.json`:
+
+```json
+{
+  "format": "heyl-dummy-v1",
+  "version": 2,
+  "content": {
+    "logins": {
+      "00000000-0000-4000-8000-000000000002": {"title": "Before"}
+    }
+  }
+}
+```
+
+```sh
+heyl --format json edit-title --dummy-vault dummy.json --login-id 00000000-0000-4000-8000-000000000002 --expect-title Before --title After
+```
+
+The command replaces the local fixture atomically and refuses the edit if the existing title
+differs from `--expect-title`. It uses an adjacent `.lock` file to serialize CLI writers. Use
+synthetic values in this fixture. The command runs offline and changes only the `title` field.
+
 ## What it will do
 
 ```sh

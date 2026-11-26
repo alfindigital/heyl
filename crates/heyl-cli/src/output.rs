@@ -59,6 +59,17 @@ impl Format {
     }
 }
 
+pub fn title_edited(login_id: &str, title: &str, format: Format) {
+    if format.is_json() {
+        emit(
+            format,
+            &serde_json::json!({"login_id": login_id, "title": title}),
+        );
+    } else {
+        eprintln!("Edited login {login_id}: {title:?}");
+    }
+}
+
 pub fn metadata(report: &heyl_app::metadata::Report, format: Format) {
     if format.is_json() {
         emit(format, &serde_json::json!(report));
