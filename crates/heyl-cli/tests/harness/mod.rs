@@ -533,3 +533,48 @@ async fn metadata_list_replays_private_vault_without_printing_fields() {
         );
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn edit_title_refuses_a_stale_title_through_the_live_cli_path() {
+    let scenario = Scenario::load(&path_of("get")).expect("get fixture");
+    let state = TestDir::new("edit_title_conflict", &scenario.meta.store);
+    let seed = &scenario.meta.first_draw;
+    let pair = &scenario.steps[0];
+    let server = Server::start(Arc::new(RecordedApi::new(pair.calls.clone())))
+        .await
+        .expect("a loopback port");
+    let outcome = invoke(pair, &server.endpoint(), &state, seed).await;
+    assert_eq!(outcome.code, 0, "{}", outcome.stderr);
+
+    let mut step = scenario
+        .steps
+        .iter()
+        .find(|step| step.argv.starts_with(&["get".to_owned(), "-V".to_owned()]))
+        .expect("get by vault ID fixture")
+        .clone();
+    step.argv = [
+        "edit-title",
+        "--vault-id",
+        &step.argv[2],
+        "--login-id",
+        "f1bcfdf7-c3ca-4fc6-925d-f57d5e8919bd",
+        "--expect-title",
+        "stale title",
+        "--title",
+        "proposed title",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect();
+    server.serve_from(Arc::new(RecordedApi::new(step.calls.clone())));
+    let outcome = invoke(&step, &server.endpoint(), &state, seed).await;
+    assert_eq!(
+        outcome.code,
+        heyl_app::ExitCode::Conflict as i32,
+        "{}",
+        outcome.stderr
+    );
+    assert!(outcome.stdout.is_empty());
+    assert!(outcome.stderr.contains("title conflict"));
+    assert!(server.unmatched().is_empty());
+}

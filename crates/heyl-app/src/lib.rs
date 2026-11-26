@@ -17,6 +17,7 @@
 //!   backend publishes, then decrypt every vault.
 
 pub mod doctor;
+pub mod edit_title;
 pub mod error;
 pub mod get;
 pub mod meta_vault;

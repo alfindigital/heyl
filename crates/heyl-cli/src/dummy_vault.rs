@@ -15,17 +15,20 @@ use crate::output::{self, Format};
 #[derive(Debug, Args)]
 pub struct EditTitle {
     /// Path to a JSON fixture marked heyl-dummy-v1.
-    #[arg(long, value_name = "FILE")]
-    dummy_vault: PathBuf,
+    #[arg(long, value_name = "FILE", required_unless_present = "vault_id")]
+    pub dummy_vault: Option<PathBuf>,
+    /// UUID of an existing personal heylogin vault.
+    #[arg(long, conflicts_with = "dummy_vault")]
+    pub vault_id: Option<String>,
     /// UUID of the login to change.
     #[arg(long)]
-    login_id: String,
+    pub login_id: String,
     /// Current title. Supply an empty string for an untitled entry.
     #[arg(long)]
-    expect_title: String,
+    pub expect_title: String,
     /// New title.
     #[arg(long)]
-    title: String,
+    pub title: String,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -44,8 +47,8 @@ enum EditError {
     Io(#[from] io::Error),
 }
 
-pub fn run(args: &EditTitle, format: Format) -> std::process::ExitCode {
-    match edit(args) {
+pub fn run(path: &Path, args: &EditTitle, format: Format) -> std::process::ExitCode {
+    match edit(path, args) {
         Ok(id) => {
             output::title_edited(&id.to_string(), &args.title, format);
             std::process::ExitCode::SUCCESS
@@ -57,13 +60,13 @@ pub fn run(args: &EditTitle, format: Format) -> std::process::ExitCode {
     }
 }
 
-fn edit(args: &EditTitle) -> Result<LoginId, EditError> {
+fn edit(path: &Path, args: &EditTitle) -> Result<LoginId, EditError> {
     let id = LoginId::parse(&args.login_id).map_err(|_| EditError::InvalidId)?;
     if args.title.trim().is_empty() {
         return Err(EditError::BlankTitle);
     }
 
-    let path = args.dummy_vault.canonicalize()?;
+    let path = path.canonicalize()?;
     let _lock = lock_fixture(&path)?;
     let mut fixture: Value =
         serde_json::from_slice(&fs::read(&path)?).map_err(|_| EditError::InvalidFixture)?;

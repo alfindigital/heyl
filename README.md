@@ -160,6 +160,22 @@ The command replaces the local fixture atomically and refuses the edit if the ex
 differs from `--expect-title`. It uses an adjacent `.lock` file to serialize CLI writers. Use
 synthetic values in this fixture. The command runs offline and changes only the `title` field.
 
+## Edit a title in a personal heylogin vault
+
+Use an already paired session and take the exact vault and login IDs from
+`heyl --format json list -v private --search QUERY`. Pass the current stored
+title as `--expect-title` (an empty string for an untitled entry). The list can
+show a display name when the stored title is blank.
+
+```sh
+heyl --format json edit-title --vault-id VAULT_UUID --login-id LOGIN_UUID --expect-title 'Before' --title 'After'
+```
+
+This changes one login's stored title. The command checks the expected title,
+submits one guarded commit, and reads it back before reporting success.
+Inspect the vault before retrying if submission or read-back fails.
+Compatibility with the live service has not been verified.
+
 ## What it will do
 
 ```sh
@@ -168,8 +184,8 @@ heyl totp aws-prod
 heyl run --project github.com/mrh1997/heyl/prod -- terraform apply
 ```
 
-Read-only by design: it never creates, edits or deletes logins. The single exception is
-registering itself as a named, revocable device in your heylogin app.
+The optional title edit above is scoped to one existing entry in a personal vault.
+The CLI can also register itself as a named, revocable device in your heylogin app.
 
 ## Security posture
 

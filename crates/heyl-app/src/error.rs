@@ -18,6 +18,20 @@ use heyl_domain::{AuthenticatorId, VaultId};
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum AppError {
+    /// An edit would create a blank login title.
+    #[error("the new title cannot be blank")]
+    BlankTitle,
+
+    /// The expected title or edit timestamp is stale.
+    #[error("title conflict: the expected title or edit timestamp is stale")]
+    TitleConflict,
+
+    /// The API acknowledged the commit, but read-back did not confirm the title.
+    #[error(
+        "the commit was submitted, but its title could not be verified; inspect the entry before retrying"
+    )]
+    TitleUnverified,
+
     /// The typed recovery code did not match the account's checksum.
     ///
     /// Caught locally, before `CreateTokens` — though *not* before any network
@@ -302,12 +316,13 @@ impl AppError {
             // The caller asked to make something that is already there. The
             // action — pick another name, or remove that one — is different
             // enough from every other failure to be worth its own number.
-            Self::SlotExists { .. } => ExitCode::Conflict,
+            Self::SlotExists { .. } | Self::TitleConflict => ExitCode::Conflict,
 
             // The command understood the request and will not take that value.
             // `NotConfirmed` belongs here: the answer was "no", which is a
             // value the command cannot act on rather than a fault.
-            Self::BadSettingValue { .. }
+            Self::BlankTitle
+            | Self::BadSettingValue { .. }
             | Self::TimeoutTooShort { .. }
             | Self::MalformedSlot { .. }
             | Self::MalformedSelector { .. }

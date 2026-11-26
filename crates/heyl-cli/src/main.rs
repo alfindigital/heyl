@@ -238,7 +238,7 @@ enum Command {
         field_id: Option<String>,
     },
 
-    /// Edit the title of an entry in a local synthetic vault.
+    /// Edit one login title in a personal heylogin vault or a local fixture.
     EditTitle(dummy_vault::EditTitle),
 
     /// List active login metadata without revealing protected fields.
@@ -436,8 +436,10 @@ fn main() -> std::process::ExitCode {
     }
 
     let cli = Cli::parse();
-    if let Command::EditTitle(args) = &cli.command {
-        return dummy_vault::run(args, cli.format);
+    if let Command::EditTitle(args) = &cli.command
+        && let Some(path) = &args.dummy_vault
+    {
+        return dummy_vault::run(path, args, cli.format);
     }
 
     // `current_thread`: measured ~650 µs cheaper per invocation than
@@ -552,7 +554,9 @@ async fn dispatch(
             Ok(std::process::ExitCode::SUCCESS)
         }
 
-        Command::EditTitle(_) => unreachable!("local edit is handled before adapter setup"),
+        Command::EditTitle(args) => {
+            edit_live_title(&ports, &slot, &args, cli.wait, cli.format).await
+        }
 
         Command::List {
             search,
@@ -601,6 +605,33 @@ async fn dispatch(
             })
         }
     }
+}
+
+async fn edit_live_title(
+    ports: &heyl_app::Ports<'_>,
+    slot: &Slot,
+    args: &dummy_vault::EditTitle,
+    wait: Option<u64>,
+    format: output::Format,
+) -> Result<std::process::ExitCode, AppError> {
+    let vault_id = heyl_domain::VaultId::parse(args.vault_id.as_deref().unwrap_or_default())
+        .map_err(|_| AppError::MalformedSelector { what: "--vault-id" })?;
+    let login_id = heyl_domain::LoginId::parse(&args.login_id)
+        .map_err(|_| AppError::MalformedSelector { what: "--login-id" })?;
+    let result = heyl_app::edit_title::run(
+        ports,
+        slot,
+        vault_id,
+        login_id,
+        &args.expect_title,
+        &args.title,
+        wait,
+    )
+    .await;
+    heyl_app::session::finish(ports, slot).await;
+    result?;
+    output::title_edited(&login_id.to_string(), &args.title, format);
+    Ok(std::process::ExitCode::SUCCESS)
 }
 
 /// `heyl run`: resolve the project's variables, then run the command with

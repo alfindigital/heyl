@@ -273,6 +273,8 @@ pub(crate) struct Candidate {
 
 /// An opened, folded login vault and the key that decrypts its secrets.
 pub(crate) struct Opened {
+    pub(crate) latest_commit: Option<heyl_domain::CommitId>,
+    pub(crate) vault_key: heyl_domain::VaultSecret,
     pub(crate) document: heyl_vault::Document,
     pub(crate) protected: ProtectedSecret,
 }
@@ -457,6 +459,8 @@ pub(crate) async fn open_vault(
     };
 
     Ok(Opened {
+        latest_commit: commits.commits.last().map(|commit| commit.id),
+        vault_key: vault_secret,
         document,
         protected,
     })
