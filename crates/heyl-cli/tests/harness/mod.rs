@@ -40,6 +40,8 @@
 //! which is prose for people and would make every copy edit a test failure; and
 //! not the traffic, because the corpus is an *input*, not an expectation.
 
+mod edit_title;
+
 use std::{path::PathBuf, sync::Arc};
 
 use heyl_grpc::{RecordedApi, Scenario, Server};

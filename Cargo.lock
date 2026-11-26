@@ -1210,6 +1210,7 @@ dependencies = [
  "heyl-grpc",
  "heyl-platform",
  "heyl-ports",
+ "heyl-proto",
  "heyl-vault",
  "http",
  "http-body-util",
