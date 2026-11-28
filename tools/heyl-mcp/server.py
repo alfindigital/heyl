@@ -3,7 +3,13 @@
 # dependencies = ["mcp==1.26.0"]
 # ///
 
+import asyncio
+import json
+import os
+import shutil
+import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Annotated, Literal
 from uuid import uuid4
 
@@ -68,6 +74,40 @@ def get_current_record(login_id: str, expected_title: str) -> LoginRecord:
     return record
 
 
+async def fill_in_ego(fixture: PasswordFixture) -> None:
+    executable = shutil.which("ego-browser.exe" if os.name == "nt" else "ego-browser")
+    if executable is None and os.name == "nt":
+        # The standard Windows install exposes a .cmd shim on PATH.
+        installed = Path.home() / ".local/share/ego/active_version_dir/ego-browser.exe"
+        if installed.is_file():
+            executable = str(installed)
+    if executable is None:
+        raise ToolError("Ego Browser CLI is required for the dummy fill test.")
+
+    module_url = Path(__file__).resolve().with_name("ego_fill.mjs").as_uri()
+    script = (
+        f"const {{ fillDummyPassword }} = await import({json.dumps(module_url)});\n"
+        f"await fillDummyPassword({json.dumps(fixture)});\n"
+    )
+    try:
+        completed = await asyncio.to_thread(
+            subprocess.run,
+            [executable, "nodejs"],
+            input=script,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            encoding="utf-8",
+            errors="replace",
+            timeout=45,
+        )
+    except subprocess.TimeoutExpired:
+        raise ToolError("Ego Browser timed out during the dummy fill test.") from None
+    except OSError:
+        raise ToolError("Could not start the Ego Browser CLI.") from None
+    if completed.returncode != 0 or "HEYL_DUMMY_FILL_OK" not in completed.stdout.splitlines():
+        raise ToolError("Ego did not verify the dummy fill. Check that Ego Desktop is running.")
+
+
 @server.tool(
     annotations=ToolAnnotations(
         readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False
@@ -127,6 +167,20 @@ async def set_dummy_password(
     if record.password_fixture != expected_password_fixture:
         raise ToolError("Password fixture changed. Use the fixture last set successfully before retrying.")
     record.password_fixture = password_fixture
+    return OperationResult()
+
+
+@server.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False
+    )
+)
+async def fill_dummy_password(login_id: str, expected_title: str) -> OperationResult:
+    """Fill and verify a synthetic login's password on a local test form in Ego Browser."""
+    record = get_current_record(login_id, expected_title)
+    if record.password_fixture is None:
+        raise ToolError("No dummy password is set. Use set_dummy_password first.")
+    await fill_in_ego(record.password_fixture)
     return OperationResult()
 
 

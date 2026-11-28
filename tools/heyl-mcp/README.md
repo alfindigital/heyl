@@ -30,6 +30,20 @@ Search and create return metadata without the password fixture. Updates and
 deletion reject a stale title. Changing the password fixture also rejects a
 stale expected fixture.
 
+### Try dummy autofill in Ego Browser
+
+Open Ego Desktop with its CLI installed. Start a new Codex session to load
+`fill_dummy_password`, then try:
+
+> Create a dummy login for `ego-fill-test.example` with the `dummy-b` fixture,
+> find it with `search_logins`, and run `fill_dummy_password` on the result.
+
+Pass the entry's `login_id` and current title as `expected_title`. The tool
+opens a temporary form on `127.0.0.1`, fills the masked field in Ego Browser,
+and closes the test tab after verifying the fill without submitting the form.
+The result is `{"success": true}`. An entry without a fixture needs
+`set_dummy_password` first. The target is always the tool's local form.
+
 Run the stdio integration test from this directory.
 
 ```powershell

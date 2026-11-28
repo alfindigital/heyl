@@ -1,8 +1,13 @@
 import unittest
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from mcp.server.fastmcp.exceptions import ToolError
+from mcp.shared.memory import create_connected_server_and_client_session
+
+import server as local_mcp
 
 
 class LocalMcpTest(unittest.IsolatedAsyncioTestCase):
@@ -14,10 +19,17 @@ class LocalMcpTest(unittest.IsolatedAsyncioTestCase):
             tools = {tool.name: tool for tool in (await session.list_tools()).tools}
             self.assertEqual(
                 set(tools),
-                {"create_login", "search_logins", "rename_login", "set_dummy_password", "delete_login"},
+                {
+                    "create_login", "search_logins", "rename_login", "set_dummy_password",
+                    "delete_login", "fill_dummy_password",
+                },
             )
             self.assertTrue(tools["search_logins"].annotations.readOnlyHint)
             self.assertFalse(tools["rename_login"].annotations.openWorldHint)
+            fill_tool = tools["fill_dummy_password"]
+            self.assertFalse(fill_tool.annotations.readOnlyHint)
+            self.assertFalse(fill_tool.annotations.openWorldHint)
+            self.assertEqual(set(fill_tool.inputSchema["properties"]), {"login_id", "expected_title"})
 
             result = await session.call_tool("search_logins", {"query": " HEYL-TEST.EXAMPLE "})
             self.assertFalse(result.isError, result.content)
@@ -101,6 +113,48 @@ class LocalMcpTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(gone.structuredContent, {"entries": []})
             seed = await session.call_tool("search_logins", {"query": "heyl-test.example"})
             self.assertEqual(seed.structuredContent["entries"][0]["title"], "HEYL-CLI-TEST-01")
+
+    async def test_fill_uses_the_selected_fixture_and_returns_only_status(self):
+        async with create_connected_server_and_client_session(local_mcp.server) as session:
+            created = await session.call_tool("create_login", {
+                "title": "Ego fill test",
+                "website_host": "ego-fill-test.example",
+            })
+            self.assertFalse(created.isError, created.content)
+            entry = created.structuredContent
+            target = {"login_id": entry["login_id"], "expected_title": entry["title"]}
+            self.addCleanup(local_mcp.records.pop, target["login_id"])
+
+            browser = AsyncMock()
+            with patch.object(local_mcp, "fill_in_ego", browser):
+                rejections = (
+                    ({**target, "login_id": "unknown"}, "Unknown login ID"),
+                    ({**target, "expected_title": "Old title"}, "Title changed"),
+                    (target, "No dummy password is set"),
+                )
+                for rejected, message in rejections:
+                    result = await session.call_tool("fill_dummy_password", rejected)
+                    self.assertTrue(result.isError)
+                    self.assertIn(message, result.content[0].text)
+                browser.assert_not_awaited()
+
+                changed = await session.call_tool("set_dummy_password", {
+                    **target,
+                    "expected_password_fixture": None,
+                    "password_fixture": "dummy-b",
+                })
+                self.assertFalse(changed.isError, changed.content)
+
+                result = await session.call_tool("fill_dummy_password", target)
+                self.assertFalse(result.isError, result.content)
+                browser.assert_awaited_once_with("dummy-b")
+                self.assertEqual(result.structuredContent, {"success": True})
+                self.assertNotIn("dummy-b", result.content[0].text)
+
+                browser.side_effect = ToolError("Ego did not verify the dummy fill.")
+                result = await session.call_tool("fill_dummy_password", target)
+                self.assertTrue(result.isError)
+                self.assertIn("Ego did not verify", result.content[0].text)
 
 
 if __name__ == "__main__":
